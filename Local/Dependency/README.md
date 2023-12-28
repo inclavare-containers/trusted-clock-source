@@ -1,0 +1,3 @@
+## Dependency
+
+This directory is supposed to contain all the dependent libraries including Rats-TLS. You should run the shell script `./install-rats-tls.sh <rats-tls-src-dir>` to install the Rats-TLS libraries into this directory since the default installation provided by Rats-TLS wouldn't install all the required libraries and it's likely that there are many errors like 'undefined references' if you use it directly. 

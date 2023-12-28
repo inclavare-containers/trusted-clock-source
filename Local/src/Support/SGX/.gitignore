@@ -1,0 +1,8 @@
+.vscode
+
+Debug-build
+Release-build
+Prerelease-build
+*-build
+
+*.pem

@@ -1,0 +1,25 @@
+enclave {
+        include "rats-tls/api.h"
+        include "internal/core.h"
+        include "sgx_eid.h"
+
+        from "rtls.edl" import *;
+        from "sgx_tsgxssl.edl" import *;
+
+        trusted {
+                public void ecallGetClientError(
+                                [out, size=infoLen] char *errorInfo, 
+                                size_t infoLen);
+
+                public int64_t ecallStartRatsClient(
+                                uint32_t serverAddr, 
+                                uint16_t serverPort, 
+                                unsigned flags, 
+                                [in, string] const char *attesterType, 
+                                [in, string] const char *verifierType, 
+                                [in, string] const char *tlsType, 
+                                [in, string] const char *cryptoType);
+
+                public int64_t ecallStopRatsClient();
+        };
+};
