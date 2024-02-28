@@ -1,6 +1,9 @@
 ##
 cmake_minimum_required(VERSION 3.5.1)
 
+set(SGX 1)
+add_definitions(-DSGX)
+
 if (DEFINED TCS_DEPENDENCY_DIR)
 else()
     set(TCS_DEPENDENCY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Dependency")
@@ -69,12 +72,12 @@ include(CompilerOptions)
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../Module/Utility")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../Module/Communication")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/Utility")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/EnclaveUtils")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-
-set(SGX 1)
-add_definitions(-DSGX)
 
 add_subdirectory(Communication)
 
 # cmake -DSGX=on -D CMAKE_BUILD_TYPE:STRING="Debug" -B Debug-build .
+# cmake -D CMAKE_BUILD_TYPE:STRING="Debug" -B Debug-build .
+# make -C Debug-build clean all install

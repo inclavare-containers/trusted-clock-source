@@ -8,6 +8,22 @@
 #define TCS_TCSMESSAGE_H_
 
 #include <stdint.h>
+#include <stddef.h>
+
+#define TCS_AES_KEY_SIZE 16
+#define TCS_AES_TAG_SIZE 16
+#define TCS_AES_IV_SIZE 12
+#define TCS_ENC_NONCE_SIZE 12
+
+#define TCS_INIT_QUERY_STR "__QUERY__"
+#define TCS_KEY_VERIFY_STR "__KEY_VERIFY__"
+
+#define TCS_ERROR_INFO_MAX_LEN 4096
+
+typedef uint8_t MessageKey[TCS_AES_KEY_SIZE];
+typedef uint8_t MessageInitVector[TCS_AES_IV_SIZE];
+typedef uint8_t MessageTag[TCS_AES_TAG_SIZE];
+typedef uint8_t MessageNonce[TCS_ENC_NONCE_SIZE];
 
 #ifdef __cplusplus
 extern "C"
@@ -41,12 +57,11 @@ extern "C"
         uint8_t m_type;
         uint8_t m_reserved[2];
         uint32_t m_size;
+        MessageNonce m_nonce;
+        MessageInitVector m_iv;
+        MessageTag m_tag;
         uint8_t m_body[];
     } EncMessage;
-
-#define TCS_INIT_QUERY_STR "QUERY"
-
-#define TCS_ERROR_INFO_MAX_LEN 4096
 
 #ifdef __cplusplus
 }

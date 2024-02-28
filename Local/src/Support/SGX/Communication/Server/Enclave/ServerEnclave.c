@@ -16,6 +16,7 @@
 #include "sgx_trts.h"
 
 #include "TCSMessage.h"
+#include "EnclaveUtils.h"
 
 #include "ServerEnclave_t.h"
 
@@ -35,6 +36,7 @@ typedef struct __ServerItemT
     int64_t m_socketHandler;
     rats_tls_handle m_ratsHandler;
     int64_t m_connHandler;
+    MessageKey m_key;
 } ServerItemT;
 
 static ServerItemT mainServerItem = {.m_socketHandler = 0, .m_ratsHandler = NULL, .m_connHandler = 0};
@@ -221,13 +223,13 @@ int64_t ecallAcceptConn()
     mainServerItem.m_connHandler = connHandler;
 
     // Receive initialization message
-    recvBuffer = (uint8_t *)malloc(256);
+    size_t bufferSize = 256;
+    recvBuffer = (uint8_t *)malloc(bufferSize);
     if (!recvBuffer)
     {
-        storeErrorInfo("Failed to allocate memory for received buffer.");
+        storeErrorInfo("Failed to allocate memory for received buffer for initialization message.");
         goto COMM_ERR;
     }
-    size_t bufferSize = sizeof(256);
     ratsResult = rats_tls_receive(mainServerItem.m_ratsHandler, recvBuffer, &bufferSize);
     if (ratsResult != RATS_TLS_ERR_NONE)
     {
@@ -257,7 +259,8 @@ int64_t ecallAcceptConn()
     uint64_t unique_conn_id = 0;
 
     // response //
-    respBuffer = (uint8_t *)malloc(sizeof(BaseMessage) + sizeof(unique_conn_id));
+    bufferSize = sizeof(BaseMessage) + sizeof(unique_conn_id);
+    respBuffer = (uint8_t *)malloc(bufferSize);
     if (!respBuffer)
     {
         storeErrorInfo("Failed to allocate memory for response buffer.");
@@ -270,8 +273,7 @@ int64_t ecallAcceptConn()
     respMsg->m_reserved[0] = respMsg->m_reserved[1] = 1;
     respMsg->m_size = sizeof(unique_conn_id);
     memcpy(respMsg->m_body, (uint8_t *)(&unique_conn_id), sizeof(unique_conn_id));
-    bufferSize = sizeof(BaseMessage) + respMsg->m_size;
-    ratsResult = rats_tls_transmit(mainServerItem.m_ratsHandler, (void *)(&respMsg), &bufferSize);
+    ratsResult = rats_tls_transmit(mainServerItem.m_ratsHandler, respBuffer, &bufferSize);
     if (ratsResult != RATS_TLS_ERR_NONE)
     {
         storeErrorInfo("Failed to send initialization query response message in Rats-TLS. Rats-TLS error: %d.", ratsResult);
@@ -326,4 +328,204 @@ int64_t ecallCloseRatsServer()
     rats_tls_cleanup(mainServerItem.m_ratsHandler);
 
     return 0;
+}
+
+int64_t ecallExchangeServerKey()
+{
+    int64_t connHandler = mainServerItem.m_connHandler;
+    sgx_status_t sgxStatus = SGX_SUCCESS;
+    int ratsResult = 0;
+    uint8_t *recvBuffer = NULL;
+    uint8_t *respBuffer = NULL;
+    char *recvVerifyStr = NULL;
+    BaseMessage errRespMsg;
+
+    // Receive request message for key exchange
+    size_t bufferSize = 256;
+    recvBuffer = (uint8_t *)malloc(bufferSize);
+    if (!recvBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for received buffer for key exchange.");
+        goto COMM_ERR;
+    }
+    ratsResult = rats_tls_receive(mainServerItem.m_ratsHandler, recvBuffer, &bufferSize);
+    if (ratsResult != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to receive in Rats-TLS for key exchange. Rats-TLS error: %d.", ratsResult);
+        goto COMM_ERR;
+    }
+    if (bufferSize < sizeof(BaseMessage))
+    {
+        storeErrorInfo("From client: the sent message is invalid (too small).");
+        goto COMM_INVALID;
+    }
+
+    BaseMessage *recvMsg = (BaseMessage *)recvBuffer;
+    if (bufferSize < sizeof(BaseMessage) + recvMsg->m_size)
+    {
+        storeErrorInfo("From client: the sent message is invalid (too small).");
+        goto COMM_INVALID;
+    }
+    if (recvMsg->m_size != TCS_AES_KEY_SIZE)
+    {
+        storeErrorInfo("From client: the sent message is invalid (invalid exchange key information).");
+        goto COMM_INVALID;
+    }
+
+    MessageKey serverKey;
+    generateRandomBytes(serverKey, TCS_AES_KEY_SIZE);
+
+    for (int i = 0; i < TCS_AES_KEY_SIZE; ++i)
+    {
+        mainServerItem.m_key[i] = serverKey[i] ^ (recvMsg->m_body[i]);
+    }
+
+    bufferSize = sizeof(BaseMessage) + TCS_AES_KEY_SIZE;
+    respBuffer = (uint8_t *)malloc(bufferSize);
+    if (!respBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for response buffer.");
+        goto COMM_ERR;
+    }
+    BaseMessage *respMsg = (BaseMessage *)respBuffer;
+    respMsg->m_category = TCS_BASIC_MESSAGE;
+    respMsg->m_type = TCS_KEY_EXCHANGE_MESSAGE;
+    respMsg->m_reserved[0] = 1;
+    respMsg->m_reserved[1] = 1;
+    respMsg->m_size = TCS_AES_KEY_SIZE;
+    memcpy(respMsg->m_body, serverKey, TCS_AES_KEY_SIZE);
+    ratsResult = rats_tls_transmit(mainServerItem.m_ratsHandler, respBuffer, &bufferSize);
+    if (ratsResult != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to send response message in Rats-TLS for key exchange. Rats-TLS error: %d.", ratsResult);
+        goto COMM_ERR;
+    }
+
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(respBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    // Receive request message for key verification
+    bufferSize = 256;
+    recvBuffer = (uint8_t *)malloc(bufferSize);
+    if (!recvBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for received buffer for key exchange.");
+        goto COMM_ERR;
+    }
+    ratsResult = rats_tls_receive(mainServerItem.m_ratsHandler, recvBuffer, &bufferSize);
+    if (ratsResult != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to receive in Rats-TLS for key exchange. Rats-TLS error: %d.", ratsResult);
+        goto COMM_ERR;
+    }
+    if (bufferSize < sizeof(EncMessage))
+    {
+        storeErrorInfo("From client: the sent message is invalid (too small).");
+        goto COMM_INVALID;
+    }
+
+    EncMessage *recvEncMsg = (EncMessage *)recvBuffer;
+    if (bufferSize < sizeof(EncMessage) + recvEncMsg->m_size)
+    {
+        storeErrorInfo("From client: the sent message is invalid (too small).");
+        goto COMM_INVALID;
+    }
+    if (recvEncMsg->m_size != strlen(TCS_KEY_VERIFY_STR) + 1)
+    {
+        storeErrorInfo("From client: the sent message is invalid (invalid key verification information).");
+        goto COMM_INVALID;
+    }
+
+    // decrypt the message
+    recvVerifyStr = (char *)malloc(recvEncMsg->m_size);
+    memset(recvVerifyStr, 0, recvEncMsg->m_size);
+    sgxStatus = decryptData(
+        &mainServerItem.m_key,
+        &recvEncMsg->m_iv,
+        &recvEncMsg->m_tag,
+        recvEncMsg->m_body,
+        recvEncMsg->m_size,
+        (uint8_t *)recvVerifyStr);
+    if (sgxStatus != SGX_SUCCESS)
+    {
+        storeErrorInfo("From client: the sent message is invalid (failed to decrypt the message; SGX: %.4x)", sgxStatus);
+        goto COMM_INVALID;
+    }
+
+    if (strcmp(recvVerifyStr, TCS_KEY_VERIFY_STR) != 0)
+    {
+        storeErrorInfo("From client: the sent message is invalid (invalid key verification information).");
+        goto COMM_INVALID;
+    }
+
+    bufferSize = sizeof(EncMessage) + strlen(TCS_KEY_VERIFY_STR) + 1;
+    respBuffer = (uint8_t *)malloc(bufferSize);
+    if (!respBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for response buffer.");
+        goto COMM_ERR;
+    }
+    EncMessage *respEncMsg = (EncMessage *)respBuffer;
+    respEncMsg->m_category = TCS_ENCRYPTED_MESSAGE;
+    respEncMsg->m_type = TCS_KEY_EXCHANGE_MESSAGE;
+    respEncMsg->m_reserved[0] = 1;
+    respEncMsg->m_reserved[1] = 1;
+    respEncMsg->m_size = strlen(TCS_KEY_VERIFY_STR) + 1;
+    // generate a nonce
+    generateRandomBytes(respEncMsg->m_nonce, TCS_ENC_NONCE_SIZE);
+    // encrypt message
+    sgxStatus = encryptData(
+        &mainServerItem.m_key,
+        &respEncMsg->m_iv,
+        &respEncMsg->m_tag,
+        (uint8_t *)TCS_KEY_VERIFY_STR,
+        strlen(TCS_KEY_VERIFY_STR) + 1,
+        respEncMsg->m_body);
+    if (sgxStatus != SGX_SUCCESS)
+    {
+        storeErrorInfo("Failed to encrypt the response message for key verification. SGX: %.4x", sgxStatus);
+        goto COMM_ERR;
+    }
+    ratsResult = rats_tls_transmit(mainServerItem.m_ratsHandler, respBuffer, &bufferSize);
+    if (ratsResult != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to send response message in Rats-TLS for key verification. Rats-TLS error: %d.", ratsResult);
+        goto COMM_ERR;
+    }
+
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(respBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    return 0;
+
+COMM_INVALID:
+    errRespMsg.m_category = TCS_BASIC_MESSAGE;
+    errRespMsg.m_type = TCS_INITIALIZATION_MESSAGE;
+    errRespMsg.m_reserved[0] = errRespMsg.m_reserved[1] = 0;
+    errRespMsg.m_size = 0;
+    bufferSize = sizeof(errRespMsg);
+    ratsResult = rats_tls_transmit(mainServerItem.m_ratsHandler, (void *)(&errRespMsg), &bufferSize);
+    if (ratsResult != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to send initialization query response message (error feedback) in Rats-TLS. Rats-TLS error: %d.", ratsResult);
+        goto COMM_ERR;
+    }
+    ocall_close(&ratsResult, connHandler);
+
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(respBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    return 1;
+
+COMM_ERR:
+    ocall_close(&ratsResult, connHandler);
+
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(respBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    return -1;
 }

@@ -26,7 +26,7 @@ namespace TCS
         /// @param isDebugEnclave
         /// @return enclave ID
         /// @exception `SGXErrorException`
-        sgx_enclave_id_t loadEnclave(const std::string &_enclave, bool isDebugEnclave)
+        inline sgx_enclave_id_t loadEnclave(const std::string &_enclave, bool isDebugEnclave)
         {
             sgx_launch_token_t launchToken;
             memset(launchToken, 0, sizeof(launchToken));
@@ -40,7 +40,7 @@ namespace TCS
             return enclaveID;
         }
 
-        std::string getErrorInfoFromEnclave(sgx_enclave_id_t enclaveID, const std::function<sgx_status_t(sgx_enclave_id_t, char *, size_t)> &ecallGetErrorInfoFunc)
+        inline std::string getErrorInfoFromEnclave(sgx_enclave_id_t enclaveID, const std::function<sgx_status_t(sgx_enclave_id_t, char *, size_t)> &ecallGetErrorInfoFunc)
         {
             if (ecallGetErrorInfoFunc)
             {

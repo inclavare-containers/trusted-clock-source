@@ -28,3 +28,6 @@ add_untrusted_library(${PROJECT_NAME} STATIC
 add_dependencies(${PROJECT_NAME} SGXClientEnclave-sign)
 
 add_subdirectory(Enclave)
+
+install(TARGETS ${PROJECT_NAME}
+	DESTINATION ${CMAKE_BINARY_DIR}/lib)

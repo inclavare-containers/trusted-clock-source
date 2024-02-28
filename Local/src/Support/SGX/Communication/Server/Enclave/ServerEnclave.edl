@@ -25,5 +25,7 @@ enclave {
                 public int64_t ecallCloseConn();
 
                 public int64_t ecallCloseRatsServer();
+
+                public int64_t ecallExchangeServerKey();
         };
 };

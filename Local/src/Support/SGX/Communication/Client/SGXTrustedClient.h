@@ -30,23 +30,35 @@ namespace TCS
 
         public:
             SGXTrustedClient() : TrustedClient(){};
+            SGXTrustedClient(const std::string &_enclave) : TrustedClient(), m_enclaveFilePath(_enclave) {}
             SGXTrustedClient(const std::string &_addr, uint16_t _port) : TrustedClient(_addr, _port) {}
+            SGXTrustedClient(const std::string &_enclave, const std::string &_addr, uint16_t _port) : TrustedClient(_addr, _port), m_enclaveFilePath(_enclave) {}
             ~SGXTrustedClient() = default;
 
-            /// @brief Start Rats-TLS client based on Intel SGX
+            /// @brief Start Rats-TLS client dependent on Intel SGX
             /// @exception `SGXErrorException`
+            /// @exception `ECallErrorException`
+            /// @exception `InvalidArgumentException`
             void start();
 
-            /// @brief Start Rats-TLS client based on Intel SGX
+            /// @brief Start Rats-TLS client dependent on Intel SGX
             /// @param _addr
             /// @param _port
             /// @exception `SGXErrorException`
             /// @exception `ECallErrorException`
+            /// @exception `InvalidArgumentException`
             void start(const std::string &_addr, uint16_t _port);
+
+            /// @brief Exchange key
+            /// @exception `SGXErrorException`
+            /// @exception `ECallErrorException`
+            /// @exception `UnInitializedException`
+            void exchangeKey();
 
             /// @brief Stop the client
             /// @exception `SGXErrorException`
             /// @exception `ECallErrorException`
+            /// @exception `UnInitializedException`
             void stop();
         };
     }

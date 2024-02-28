@@ -2,7 +2,8 @@
 
 Debug-build
 Release-build
-Prerelease-build
-*-build
+build
 
-*.pem
+*.o
+*.so
+*.a

@@ -50,16 +50,25 @@ namespace TCS
             /// @brief Accept connection from a client
             /// @exception `SGXErrorException`
             /// @exception `ECallErrorException`
+            /// @exception `UnInitializedException`
             void accept();
+
+            /// @brief Exchange server key
+            /// @exception `SGXErrorException`
+            /// @exception `ECallErrorException`
+            /// @exception `UnInitializedException`
+            void exchangeKey();
 
             /// @brief Close the connection
             /// @exception `SGXErrorException`
             /// @exception `ECallErrorException`
+            /// @exception `UnInitializedException`
             void close();
 
             /// @brief Stop the server
             /// @exception `SGXErrorException`
             /// @exception `ECallErrorException`
+            /// @exception `UnInitializedException`
             void stop();
         };
     }

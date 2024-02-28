@@ -18,7 +18,8 @@ include(SGXCommon)
 set(INCLUDE_DIRS ${RATS_TLS_HEADER_DIR}
                     ${RATS_TLS_HEADER_DIR}/rats-tls
                     ${RATS_TLS_HEADER_DIR}/edl
-                    ${RATS_TLS_HEADER_DIR}/external/sgx-ssl/intel-sgx-ssl/src/intel-sgx-ssl/Linux/package/include)
+                    ${RATS_TLS_HEADER_DIR}/external/sgx-ssl/intel-sgx-ssl/src/intel-sgx-ssl/Linux/package/include
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../../EnclaveUtils)
 
 set(LIBRARY_DIRS ${RATS_TLS_LIB_DIR}
                 ${RATS_TLS_LIB_DIR}/crypto_wrappers/nullcrypto
@@ -42,7 +43,8 @@ set(EDL_SEARCH_PATHS ${RATS_TLS_HEADER_DIR}/edl)
 include_directories(${INCLUDE_DIRS})
 link_directories(${LIBRARY_DIRS})
 
-set(E_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/ClientEnclave.c)
+set(E_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/ClientEnclave.c
+           ${CMAKE_CURRENT_SOURCE_DIR}/../../../EnclaveUtils/EnclaveUtils.c)
 set(EDLS ${CMAKE_CURRENT_SOURCE_DIR}/ClientEnclave.edl)
 set(LDS ${CMAKE_CURRENT_SOURCE_DIR}/ClientEnclave.lds)
 set(DEPEND_TRUSTED_LIBS crypto_wrapper_nullcrypto
@@ -64,4 +66,4 @@ add_enclave_library(SGXClientEnclave SRCS ${E_SRCS} EDL ${EDLS} TRUSTED_LIBS ${D
 enclave_sign(SGXClientEnclave KEY ClientEnclave.pem CONFIG ClientEnclave.xml)
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/SGXClientEnclave.signed.so
-        DESTINATION ${CMAKE_BINARY_DIR}/bin)
+        DESTINATION ${CMAKE_BINARY_DIR}/lib)

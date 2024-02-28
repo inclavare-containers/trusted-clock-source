@@ -21,5 +21,7 @@ enclave {
                                 [in, string] const char *cryptoType);
 
                 public int64_t ecallStopRatsClient();
+
+                public int64_t ecallExchangeClientKey();
         };
 };

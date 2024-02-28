@@ -16,6 +16,7 @@
 #include "sgx_trts.h"
 
 #include "TCSMessage.h"
+#include "EnclaveUtils.h"
 
 #include "ClientEnclave_t.h"
 
@@ -33,6 +34,7 @@
 typedef struct __ClientItemT
 {
     rats_tls_handle m_ratsHandler;
+    MessageKey m_key;
 } ClientItemT;
 
 static ClientItemT mainClientItem = {.m_ratsHandler = NULL};
@@ -220,4 +222,198 @@ int64_t ecallStopRatsClient()
     rats_tls_cleanup(mainClientItem.m_ratsHandler);
 
     return 0;
+}
+
+int64_t ecallExchangeClientKey()
+{
+    uint8_t *sendBuffer = NULL;
+    uint8_t *recvBuffer = NULL;
+    char *recvVerifyStr = NULL;
+    sgx_status_t sgxStatus = SGX_SUCCESS;
+    rats_tls_err_t ratsReturn = RATS_TLS_ERR_NONE;
+
+    MessageKey clientKey;
+    generateRandomBytes(clientKey, TCS_AES_KEY_SIZE);
+
+    /* Message to be sent */
+    size_t bufferSize = sizeof(BaseMessage) + TCS_AES_KEY_SIZE;
+    sendBuffer = (uint8_t *)malloc(bufferSize);
+    if (!sendBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for sent buffer");
+        goto COMM_ERR;
+    }
+    BaseMessage *sendBaseMsg = (BaseMessage *)sendBuffer;
+    sendBaseMsg->m_category = TCS_BASIC_MESSAGE;
+    sendBaseMsg->m_type = TCS_KEY_EXCHANGE_MESSAGE;
+    sendBaseMsg->m_reserved[0] = 1;
+    sendBaseMsg->m_reserved[1] = 1;
+    sendBaseMsg->m_size = TCS_AES_KEY_SIZE;
+    memcpy(sendBaseMsg->m_body, clientKey, TCS_AES_KEY_SIZE);
+
+    /* Send message */
+    ratsReturn = rats_tls_transmit(mainClientItem.m_ratsHandler, sendBuffer, &bufferSize);
+    if (ratsReturn != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to send key exchange request message. Rats-TLS return: %d", ratsReturn);
+        goto COMM_SERVER_ERR;
+    }
+
+    /* Receive message */
+    bufferSize = 256;
+    recvBuffer = (uint8_t *)malloc(bufferSize);
+    if (!recvBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for received buffer");
+        goto COMM_ERR;
+    }
+    ratsReturn = rats_tls_receive(mainClientItem.m_ratsHandler, recvBuffer, &bufferSize);
+    if (ratsReturn != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to receive key exchange response message. Rats-TLS return: %d", ratsReturn);
+        goto COMM_ERR;
+    }
+    if (bufferSize < sizeof(BaseMessage) + TCS_AES_KEY_SIZE)
+    {
+        storeErrorInfo("Server Error: received invalid message for key exchange.");
+        goto COMM_SERVER_ERR;
+    }
+
+    /* Message received */
+    BaseMessage *recvBaseMsg = (BaseMessage *)recvBuffer;
+    if (recvBaseMsg->m_size != TCS_AES_KEY_SIZE || recvBaseMsg->m_category != TCS_BASIC_MESSAGE || recvBaseMsg->m_type != TCS_KEY_EXCHANGE_MESSAGE)
+    {
+        storeErrorInfo("Server Error: received invalid message for key exchange.");
+        goto COMM_SERVER_ERR;
+    }
+    if (recvBaseMsg->m_reserved[0] == 0)
+    {
+        storeErrorInfo("From server: invalid request message for key exchange.");
+        goto COMM_SERVER_ERR;
+    }
+
+    /* Message Key */
+    for (int i = 0; i < TCS_AES_KEY_SIZE; ++i)
+    {
+        mainClientItem.m_key[i] = clientKey[i] ^ recvBaseMsg->m_body[i];
+    }
+
+    SAFE_FREE(sendBuffer);
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    bufferSize = sizeof(EncMessage) + strlen(TCS_KEY_VERIFY_STR) + 1;
+    sendBuffer = (uint8_t *)malloc(bufferSize);
+    if (!sendBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for sent buffer");
+        goto COMM_ERR;
+    }
+    EncMessage *sendEncMsg = (EncMessage *)sendBuffer;
+    sendEncMsg->m_category = TCS_ENCRYPTED_MESSAGE;
+    sendEncMsg->m_type = TCS_KEY_EXCHANGE_MESSAGE;
+    sendEncMsg->m_reserved[0] = 1;
+    sendEncMsg->m_reserved[1] = 1;
+    sendEncMsg->m_size = strlen(TCS_KEY_VERIFY_STR) + 1;
+    /* Encrypt message */
+    sgxStatus = encryptData(
+        &mainClientItem.m_key,
+        &sendEncMsg->m_iv,
+        &sendEncMsg->m_tag,
+        (uint8_t *)TCS_KEY_VERIFY_STR,
+        strlen(TCS_KEY_VERIFY_STR) + 1,
+        sendEncMsg->m_body);
+    if (sgxStatus != SGX_SUCCESS)
+    {
+        storeErrorInfo("Failed to encrypt the response message for key verification. SGX error: %.4x", sgxStatus);
+        goto COMM_ERR;
+    }
+
+    /* Send encrypted message */
+    ratsReturn = rats_tls_transmit(mainClientItem.m_ratsHandler, sendBuffer, &bufferSize);
+    if (ratsReturn != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to send key verification request message. Rats-TLS return: %d", ratsReturn);
+        goto COMM_SERVER_ERR;
+    }
+
+    bufferSize = 256;
+    recvBuffer = (uint8_t *)malloc(bufferSize);
+    if (!recvBuffer)
+    {
+        storeErrorInfo("Failed to allocate memory for received buffer");
+        goto COMM_ERR;
+    }
+
+    /* Receive */
+    ratsReturn = rats_tls_receive(mainClientItem.m_ratsHandler, recvBuffer, &bufferSize);
+    if (ratsReturn != RATS_TLS_ERR_NONE)
+    {
+        storeErrorInfo("Failed to receive key verification response message. Rats-TLS return: %d", ratsReturn);
+        goto COMM_SERVER_ERR;
+    }
+    if (bufferSize < sizeof(EncMessage) + strlen(TCS_KEY_VERIFY_STR) + 1)
+    {
+        storeErrorInfo("Server Error: received invalid message for key verification.");
+        goto COMM_SERVER_ERR;
+    }
+
+    EncMessage *recvEncMsg = (EncMessage *)recvBuffer;
+    if (recvEncMsg->m_size != strlen(TCS_KEY_VERIFY_STR) + 1 || recvEncMsg->m_category != TCS_ENCRYPTED_MESSAGE || recvEncMsg->m_type != TCS_KEY_EXCHANGE_MESSAGE)
+    {
+        storeErrorInfo("Server Error: received invalid message for key verification.");
+        goto COMM_SERVER_ERR;
+    }
+    if (recvEncMsg->m_reserved[0] == 0)
+    {
+        storeErrorInfo("From server: invalid request message for key exchange.");
+        goto COMM_SERVER_ERR;
+    }
+
+    recvVerifyStr = (char *)malloc(strlen(TCS_KEY_VERIFY_STR) + 1);
+    if (!recvVerifyStr)
+    {
+        storeErrorInfo("Failed to allocate memory for strings");
+        goto COMM_ERR;
+    }
+    sgxStatus = decryptData(
+        &mainClientItem.m_key,
+        &recvEncMsg->m_iv,
+        &recvEncMsg->m_tag,
+        recvEncMsg->m_body,
+        recvEncMsg->m_size,
+        (uint8_t *)recvVerifyStr);
+    if (sgxStatus != SGX_SUCCESS)
+    {
+        storeErrorInfo("Failed to decrypt the received message for key verification.");
+        goto COMM_SERVER_ERR;
+    }
+    if (strcmp(recvVerifyStr, TCS_KEY_VERIFY_STR) != 0)
+    {
+        storeErrorInfo("Failed to verify key.");
+        goto COMM_SERVER_ERR;
+    }
+
+    SAFE_FREE(sendBuffer);
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    return 0;
+
+COMM_SERVER_ERR:
+
+    SAFE_FREE(sendBuffer);
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    return 1;
+
+COMM_ERR:
+
+    SAFE_FREE(sendBuffer);
+    SAFE_FREE(recvBuffer);
+    SAFE_FREE(recvVerifyStr);
+
+    rats_tls_cleanup(mainClientItem.m_ratsHandler);
+    return -1;
 }
