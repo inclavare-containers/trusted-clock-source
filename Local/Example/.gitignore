@@ -1,0 +1,9 @@
+##
+
+## VS Code
+.vscode
+
+## build
+Debug-build
+Release-build
+build
